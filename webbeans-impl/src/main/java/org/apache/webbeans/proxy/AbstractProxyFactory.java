@@ -177,7 +177,7 @@ public abstract class AbstractProxyFactory
             try
             {
                 finalName = proxyClassName + i;
-                Class.forName(finalName, true, classLoader);
+                org.hotswap.agent.plugin.owb.command.ProxyClassLoadingDelegate.forName(finalName, true, classLoader);
             }
             catch (ClassNotFoundException cnfe)
             {
@@ -252,7 +252,7 @@ public abstract class AbstractProxyFactory
                 sortOutDuplicateMethods(nonInterceptedMethods),
                 constructor);
 
-        return defineAndLoadClass(classLoader, proxyClassName, proxyBytes);
+        return org.hotswap.agent.plugin.owb.command.ProxyClassLoadingDelegate.defineAndLoadClass(this, classLoader, proxyClassName, proxyBytes);
     }
 
     private Method[] sortOutDuplicateMethods(Method[] methods)
@@ -261,9 +261,9 @@ public abstract class AbstractProxyFactory
         {
             return null;
         }
-        
+
         ArrayList<Method> duplicates = new ArrayList<>();
-        
+
         for (Method outer : methods)
         {
             for (Method inner : methods)
@@ -281,14 +281,14 @@ public abstract class AbstractProxyFactory
         outsorted.removeAll(duplicates);
         return outsorted.toArray(new Method[outsorted.size()]);
     }
-     
+
     private boolean hasSameSignature(Method a, Method b)
     {
         return a.getName().equals(b.getName())
                 && a.getReturnType().equals(b.getReturnType())
                 && Arrays.equals(a.getParameterTypes(), b.getParameterTypes());
     }
-     
+
     private byte[] generateProxy(ClassLoader classLoader, Class<?> classToProxy, String proxyClassName, String proxyClassFileName,
                                  Method[] interceptedMethods, Method[] nonInterceptedMethods, Constructor<?> constructor)
             throws ProxyGenerationException

@@ -18,6 +18,51 @@
  */
 package org.apache.webbeans.config;
 
+import static java.util.Arrays.asList;
+
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.net.URL;
+import java.security.PrivilegedActionException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.stream.Collectors;
+
+import javax.annotation.Priority;
+import javax.enterprise.inject.Alternative;
+import javax.enterprise.inject.AmbiguousResolutionException;
+import javax.enterprise.inject.Model;
+import javax.enterprise.inject.Produces;
+import javax.enterprise.inject.UnproxyableResolutionException;
+import javax.enterprise.inject.UnsatisfiedResolutionException;
+import javax.enterprise.inject.Vetoed;
+import javax.enterprise.inject.spi.AnnotatedField;
+import javax.enterprise.inject.spi.AnnotatedMethod;
+import javax.enterprise.inject.spi.AnnotatedType;
+import javax.enterprise.inject.spi.Bean;
+import javax.enterprise.inject.spi.BeanAttributes;
+import javax.enterprise.inject.spi.Decorator;
+import javax.enterprise.inject.spi.DefinitionException;
+import javax.enterprise.inject.spi.InjectionPoint;
+import javax.enterprise.inject.spi.InjectionTarget;
+import javax.enterprise.inject.spi.Interceptor;
+import javax.enterprise.inject.spi.ObserverMethod;
+import javax.enterprise.inject.spi.Producer;
+
 import org.apache.webbeans.annotation.AnnotationManager;
 import org.apache.webbeans.annotation.AnyLiteral;
 import org.apache.webbeans.component.AbstractProducerBean;
@@ -51,14 +96,6 @@ import org.apache.webbeans.event.OwbObserverMethod;
 import org.apache.webbeans.exception.WebBeansConfigurationException;
 import org.apache.webbeans.exception.WebBeansDeploymentException;
 import org.apache.webbeans.exception.WebBeansException;
-
-import javax.annotation.Priority;
-import javax.enterprise.inject.Alternative;
-import javax.enterprise.inject.Produces;
-import javax.enterprise.inject.Vetoed;
-import javax.enterprise.inject.spi.BeanAttributes;
-import javax.enterprise.inject.spi.DefinitionException;
-
 import org.apache.webbeans.inject.AlternativesManager;
 import org.apache.webbeans.intercept.InterceptorsManager;
 import org.apache.webbeans.logger.WebBeansLoggerFacade;
@@ -78,6 +115,8 @@ import org.apache.webbeans.portable.events.generics.GProcessBean;
 import org.apache.webbeans.portable.events.generics.GProcessManagedBean;
 import org.apache.webbeans.spi.BdaScannerService;
 import org.apache.webbeans.spi.BeanArchiveService;
+import org.apache.webbeans.spi.BeanArchiveService.BeanArchiveInformation;
+import org.apache.webbeans.spi.BeanArchiveService.BeanDiscoveryMode;
 import org.apache.webbeans.spi.JNDIService;
 import org.apache.webbeans.spi.ScannerService;
 import org.apache.webbeans.spi.plugins.OpenWebBeansJavaEEPlugin;
@@ -90,47 +129,8 @@ import org.apache.webbeans.util.SpecializationUtil;
 import org.apache.webbeans.util.WebBeansConstants;
 import org.apache.webbeans.util.WebBeansUtil;
 import org.apache.webbeans.xml.DefaultBeanArchiveInformation;
-
-import javax.enterprise.inject.AmbiguousResolutionException;
-import javax.enterprise.inject.Model;
-import javax.enterprise.inject.UnproxyableResolutionException;
-import javax.enterprise.inject.UnsatisfiedResolutionException;
-import javax.enterprise.inject.spi.AnnotatedField;
-import javax.enterprise.inject.spi.AnnotatedMethod;
-import javax.enterprise.inject.spi.AnnotatedType;
-import javax.enterprise.inject.spi.Bean;
-import javax.enterprise.inject.spi.Decorator;
-import javax.enterprise.inject.spi.InjectionPoint;
-import javax.enterprise.inject.spi.InjectionTarget;
-import javax.enterprise.inject.spi.Interceptor;
-import javax.enterprise.inject.spi.ObserverMethod;
-import javax.enterprise.inject.spi.Producer;
-
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
-import java.net.URL;
-import java.security.PrivilegedActionException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
-
-import static java.util.Arrays.asList;
-import static org.apache.webbeans.spi.BeanArchiveService.BeanDiscoveryMode;
-import static org.apache.webbeans.spi.BeanArchiveService.BeanArchiveInformation;
+import org.hotswap.agent.plugin.owb.OwbPlugin;
+import org.hotswap.agent.util.PluginManagerInvoker;
 
 /**
  * Deploys the all beans that are defined in the {@link org.apache.webbeans.spi.ScannerService} at
@@ -174,7 +174,7 @@ public class BeansDeployer
 
     /**XML Configurator*/
     protected BeanArchiveService beanArchiveService;
-    
+
     /**Discover ejb or not*/
     protected boolean discoverEjb;
     private final WebBeansContext webBeansContext;
@@ -193,7 +193,7 @@ public class BeansDeployer
 
     /**
      * Creates a new deployer with given xml configurator.
-     * 
+     *
      * @param webBeansContext
      */
     public BeansDeployer(WebBeansContext webBeansContext)
@@ -217,7 +217,7 @@ public class BeansDeployer
      * It deploys from the web-beans.xml files and from the class files. It uses
      * the {@link org.apache.webbeans.spi.ScannerService} to get classes.
      * </p>
-     * 
+     *
      * @throws WebBeansDeploymentException if any deployment exception occurs
      */
     public synchronized void deploy(ScannerService scanner)
@@ -225,13 +225,13 @@ public class BeansDeployer
         try
         {
             if (!deployed)
-            {                
+            {
                 //Load Extensions
                 webBeansContext.getExtensionLoader().loadExtensionServices();
 
                 // Bind manager
                 JNDIService service = webBeansContext.getService(JNDIService.class);
-                
+
                 //Default jndi is just a map
                 if(service instanceof DefaultJndiService)
                 {
@@ -250,7 +250,7 @@ public class BeansDeployer
 
                 //Fire Event
                 fireBeforeBeanDiscoveryEvent();
-                
+
                 //Configure Default Beans
                 configureDefaultBeans();
 
@@ -315,7 +315,7 @@ public class BeansDeployer
 
                 // all beans which got 'overridden' by a Specialized version can be removed now
                 removeDisabledBeans();
-                
+
                 // We are finally done with our bean discovery
                 fireAfterBeanDiscoveryEvent();
 
@@ -348,6 +348,7 @@ public class BeansDeployer
                 // do some cleanup after the deployment
                 scanner.release();
                 webBeansContext.getAnnotatedElementFactory().clear();
+                registerHotswapPlugin(scanner);
             }
         }
         catch (UnsatisfiedResolutionException e)
@@ -377,6 +378,11 @@ public class BeansDeployer
             //esp. because #addInternalBean might have been called already and would cause an exception in the next run
             deployed = true;
         }
+    }
+
+    private void registerHotswapPlugin(ScannerService scanner) {
+        ClassLoader appClassLoader = Thread.currentThread().getContextClassLoader();
+        OwbPlugin.register(appClassLoader, scanner);
     }
 
     /**
@@ -673,7 +679,7 @@ public class BeansDeployer
 
         // Register Conversation built-in component
         beanManager.addInternalBean(webBeansUtil.getConversationBean());
-        
+
         // Register InjectionPoint bean
         beanManager.addInternalBean(webBeansUtil.getInjectionPointBean());
 
@@ -683,7 +689,7 @@ public class BeansDeployer
         //Register Event Bean
         beanManager.addInternalBean(webBeansUtil.getEventBean());
         beanManager.addInternalBean(webBeansUtil.getEventMetadataBean());
-        
+
         //Register Metadata Beans
         beanManager.addInternalBean(webBeansUtil.getBeanMetadataBean());
         beanManager.addInternalBean(webBeansUtil.getInterceptorMetadataBean());
@@ -692,7 +698,7 @@ public class BeansDeployer
 
         // Register PrincipalBean
         beanManager.addInternalBean(webBeansUtil.getPrincipalBean());
-        
+
         //REgister Provider Beans
         OpenWebBeansJavaEEPlugin beanEeProvider = webBeansContext.getPluginLoader().getJavaEEPlugin();
 
@@ -700,19 +706,19 @@ public class BeansDeployer
         {
             beanEeProvider.registerEEBeans();
         }
-            
+
     }
-    
+
     private void addDefaultBean(WebBeansContext ctx,String className)
     {
         Bean<?> bean = null;
-        
+
         Class<?> beanClass = ClassUtil.getClassFromName(className);
         if(beanClass != null)
         {
             bean  = (Bean)newInstance(ctx, beanClass);
         }
-        
+
         if(bean != null)
         {
             ctx.getBeanManagerImpl().addInternalBean(bean);
@@ -793,7 +799,7 @@ public class BeansDeployer
 
         event.setStarted();
     }
-    
+
     /**
      * Fires event after bean discovery.
      */
@@ -812,7 +818,7 @@ public class BeansDeployer
         manager.setAfterBeanDiscoveryDone();
         event.setStarted();
     }
-    
+
     /**
      * Fires event after bean discovery.
      */
@@ -1080,36 +1086,36 @@ public class BeansDeployer
         Set<Decorator<?>> decorators = decoratorsManager.getDecorators();
 
         logger.fine("Validation of the decorator's injection points has started.");
-        
+
         //Validate Decorators
         validate(decorators);
-        
+
         //Adding interceptors to validate
         List<javax.enterprise.inject.spi.Interceptor<?>> interceptors = interceptorsManager.getCdiInterceptors();
-        
+
         logger.fine("Validation of the interceptor's injection points has started.");
-        
+
         //Validate Interceptors
         validate(interceptors);
 
         logger.fine("Validation of the beans' injection points has started.");
 
         Set<Bean<?>> beans = webBeansContext.getBeanManagerImpl().getBeans();
-        
+
         //Validate Others
         validate(beans);
-        
+
         logger.fine("Validation of the observer methods' injection points has started.");
-        
+
         //Validate Observers
         validateObservers(webBeansContext.getNotificationManager().getObserverMethods());
 
         logger.info(OWBLogConst.INFO_0003);
     }
-    
+
     /**
      * Validates beans.
-     * 
+     *
      * @param beans deployed beans
      */
     private <T, B extends Bean<?>> void validate(Collection<B> beans)
@@ -1204,9 +1210,9 @@ public class BeansDeployer
             //Clear Names
             beanNames.clear();
         }
-        
+
     }
-    
+
     private void validateObservers(Collection<ObserverMethod<?>> observerMethods)
     {
         for (ObserverMethod<?> observerMethod: observerMethods)
@@ -1222,7 +1228,7 @@ public class BeansDeployer
     private void validateBeanNames(LinkedList<String> beanNames)
     {
         if(beanNames.size() > 0)
-        {   
+        {
             for(String beanName : beanNames)
             {
                 for(String other : beanNames)
@@ -1231,9 +1237,9 @@ public class BeansDeployer
                     int i = beanName.lastIndexOf('.');
                     if(i != -1)
                     {
-                        part = beanName.substring(0,i);                
+                        part = beanName.substring(0,i);
                     }
-                    
+
                     if(beanName.equals(other))
                     {
                         InjectionResolver resolver = webBeansContext.getBeanManagerImpl().getInjectionResolver();
@@ -1248,7 +1254,7 @@ public class BeansDeployer
                             {
                                 // throw the Exception with even more information
                                 InjectionExceptionUtil.throwAmbiguousResolutionExceptionForBeanName(beans, beanName);
-                            }   
+                            }
                         }
                     }
                     else
@@ -1259,8 +1265,8 @@ public class BeansDeployer
                                     "x is the EL name of the other bean for the bean name : " + beanName);
                         }
                     }
-                }                
-            }            
+                }
+            }
         }
     }
 
@@ -1483,7 +1489,7 @@ public class BeansDeployer
 
     /**
      * Discovers and deploys classes from class path.
-     * 
+     *
      * @param beanAttributesPerBda the AnnotatedTypes which got discovered so far and are not vetoed
      * @throws ClassNotFoundException if class not found
      */
@@ -1518,12 +1524,12 @@ public class BeansDeployer
         logger.fine("Deploying configurations from class files has ended.");
 
     }
-    
+
 
     /**
      * Common helper method used to deploy annotated types discovered through
      * scanning or during beforeBeanDiscovery.
-     * 
+     *
      * @param annotatedTypeData the AnnotatedType representing the bean to be deployed with their already computed data
      */
     private void deploySingleAnnotatedType(AnnotatedType annotatedType, ExtendedBeanAttributes annotatedTypeData, Map<AnnotatedType<?>, ExtendedBeanAttributes<?>> annotatedTypes)
@@ -1590,7 +1596,7 @@ public class BeansDeployer
 
     /**
      * Discovers and deploys alternatives, interceptors and decorators from XML.
-     * 
+     *
      * @param scanner discovery scanner
      *
      * @throws WebBeansDeploymentException if a problem occurs
@@ -1694,7 +1700,7 @@ public class BeansDeployer
         // this gets used to detect multiple definitions of the
         // same interceptor in one beans.xml file.
         Set<Class> interceptorsInFile = new HashSet<>();
-        
+
         for (String interceptor : interceptors)
         {
             Class<?> clazz = ClassUtil.getClassFromName(interceptor);
@@ -1790,22 +1796,22 @@ public class BeansDeployer
         return "WebBeans configuration defined in " + bdaLocation.toExternalForm() + " did fail. Reason is : ";
     }
 
-    
+
     /**
      * Check passivations.
      */
     protected void checkPassivationScope(Bean<?> beanObj)
     {
         boolean validate = false;
-        
+
         if(beanObj instanceof EnterpriseBeanMarker)
         {
             EnterpriseBeanMarker marker = (EnterpriseBeanMarker)beanObj;
             if(marker.isPassivationCapable())
             {
-                validate = true;   
+                validate = true;
             }
-        }        
+        }
         else if(webBeansContext.getBeanManagerImpl().isPassivatingScope(beanObj.getScope()))
         {
             if(WebBeansUtil.getPassivationId(beanObj) == null)
@@ -1819,7 +1825,7 @@ public class BeansDeployer
 
             validate = true;
         }
-        
+
         if(validate)
         {
             webBeansContext.getDeploymentValidationService().validatePassivationCapable((OwbBean<?>)beanObj);
